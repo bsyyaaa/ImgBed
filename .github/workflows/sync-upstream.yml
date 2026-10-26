@@ -45,13 +45,40 @@ jobs:
       - name: Sync upstream changes
         id: sync
         if: steps.breaking_guard.outputs.blocked != 'true'
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
-        with:
-          upstream_sync_repo: MarSeventh/CloudFlare-ImgBed
-          upstream_sync_branch: main
-          target_sync_branch: main
-          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
-          test_mode: false
+        env:
+          UPSTREAM_REPO: MarSeventh/CloudFlare-ImgBed
+          UPSTREAM_BRANCH: main
+          TARGET_BRANCH: main
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
+
+          if git merge-base --is-ancestor FETCH_HEAD HEAD; then
+            echo "Target branch is already up to date."
+            exit 0
+          fi
+
+          git config user.name "GH Action - Upstream Sync"
+          git config user.email "action@github.com"
+
+          if ! git merge --no-edit -X theirs FETCH_HEAD; then
+            if [[ -z "$(git diff --name-only --diff-filter=U)" ]]; then
+              exit 1
+            fi
+
+            while IFS= read -r -d '' path; do
+              if git cat-file -e "FETCH_HEAD:$path" 2>/dev/null; then
+                git checkout --theirs -- "$path"
+                git add -- "$path"
+              else
+                git rm -- "$path"
+              fi
+            done < <(git diff --name-only --diff-filter=U -z)
+
+            git commit --no-edit
+          fi
+
+          git push origin "HEAD:${TARGET_BRANCH}"
 
       - name: Complete breaking update notices
         if: steps.sync.outcome == 'success'
